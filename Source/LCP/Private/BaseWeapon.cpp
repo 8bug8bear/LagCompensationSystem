@@ -3,15 +3,35 @@
 
 #include "BaseWeapon.h"
 #include "Net/UnrealNetwork.h"
+#include "LCPCharacter.h"
+#include "Particles/ParticleSystemComponent.h"
 
 // Sets default values
 ABaseWeapon::ABaseWeapon()
 {
- 	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	Mesh1P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh1P"));
+	Mesh1P->bReceivesDecals = false;
+	Mesh1P->CastShadow = false;
+	Mesh1P->SetCollisionObjectType(ECC_WorldDynamic);
+	Mesh1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh1P->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Mesh1P->bOwnerNoSee = false;
+	Mesh1P->bOnlyOwnerSee = true;
+	RootComponent = Mesh1P;
+
+	Mesh3P = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("WeaponMesh3P"));
+	Mesh1P->bReceivesDecals = false;
+	Mesh1P->CastShadow = false;
+	Mesh1P->SetCollisionObjectType(ECC_WorldDynamic);
+	Mesh1P->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh1P->SetCollisionResponseToAllChannels(ECR_Ignore);
+	Mesh1P->bOwnerNoSee = true;
+	Mesh1P->bOnlyOwnerSee = false;
+	Mesh1P->SetupAttachment(Mesh1P);
 
 	bReplicates = true;
-
+	bNetUseOwnerRelevancy = true;
+	PrimaryActorTick.bCanEverTick = true;
 
 	AmountAmmo = 0;
 	AmmoInMagazine = 0;
@@ -22,6 +42,8 @@ ABaseWeapon::ABaseWeapon()
 void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(ABaseWeapon, OwningPlayer);
 
 	DOREPLIFETIME_CONDITION(ABaseWeapon, AmountAmmo,     COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ABaseWeapon, AmmoInMagazine, COND_OwnerOnly);
@@ -34,6 +56,15 @@ void ABaseWeapon::PostInitializeComponents()
 {
 	AmmoInMagazine = MagazineSize;
 	AmountAmmo = TotalAmmo - MagazineSize;
+}
+
+void ABaseWeapon::SetOwningPlayer(ALCPCharacter* NewOwningPlayer)
+{
+	if (OwningPlayer != NewOwningPlayer)
+	{
+		OwningPlayer = NewOwningPlayer;
+		SetOwner(OwningPlayer);
+	}
 }
 
 void ABaseWeapon::OnRep_Reload()
@@ -66,6 +97,36 @@ void ABaseWeapon::StopFire()
 void ABaseWeapon::Reload()
 {
 
+}
+
+void ABaseWeapon::ServerStartFire_Implementation()
+{
+	StartFire();
+}
+
+bool ABaseWeapon::ServerStartFire_Validate()
+{
+	return true;
+}
+
+void ABaseWeapon::ServerStopFire_Implementation()
+{
+	StopFire();
+}
+
+bool ABaseWeapon::ServerStopFire_Validate()
+{
+	return true;
+}
+
+void ABaseWeapon::ServerStartReload_Implementation()
+{
+	Reload();
+}
+
+bool ABaseWeapon::ServerStartReload_Validate()
+{
+	return true;
 }
 
 bool ABaseWeapon::CanFire() const
