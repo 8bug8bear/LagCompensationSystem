@@ -48,7 +48,7 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
 	DOREPLIFETIME_CONDITION(ABaseWeapon, AmountAmmo,     COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(ABaseWeapon, AmmoInMagazine, COND_OwnerOnly);
 
-	DOREPLIFETIME_CONDITION(ABaseWeapon, bWaitingReload, COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(ABaseWeapon, IsReloading,    COND_SkipOwner);
 	DOREPLIFETIME_CONDITION(ABaseWeapon, ShotCounter,    COND_SkipOwner);
 }
 
@@ -67,6 +67,44 @@ void ABaseWeapon::SetOwningPlayer(ALCPCharacter* NewOwningPlayer)
 	}
 }
 
+void ABaseWeapon::AttachWeapon()
+{
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ServerAttachWeapon();
+	}
+
+
+}
+
+void ABaseWeapon::DettachWeapon()
+{
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ServerDettachWeapon();
+	}
+}
+
+void ABaseWeapon::ServerAttachWeapon_Implementation()
+{
+	AttachWeapon();
+}
+
+bool ABaseWeapon::ServerAttachWeapon_Validate()
+{
+	return true;
+}
+
+void ABaseWeapon::ServerDettachWeapon_Implementation()
+{
+	DettachWeapon();
+}
+
+bool ABaseWeapon::ServerDettachWeapon_Validate()
+{
+	return true;
+}
+
 void ABaseWeapon::OnRep_Reload()
 {
 	if (bWaitingReload)
@@ -81,22 +119,52 @@ void ABaseWeapon::OnRep_Reload()
 
 void ABaseWeapon::OnRep_ShotCounter()
 {
-
+	if (ShotCounter > 0)
+	{
+		SimulateShot();
+	}
 }
 
 void ABaseWeapon::StartFire()
 {
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ServerStartFire();
+	}
 
+	if (!bWontsFire)
+	{
+		bWontsFire = true;
+		DetermineWeaponState();
+	}
 }
 
 void ABaseWeapon::StopFire()
 {
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ServerStopFire();
+	}
 
+	if (bWontsFire)
+	{
+		bWontsFire = false;
+		DetermineWeaponState();
+	}
 }
 
-void ABaseWeapon::Reload()
+void ABaseWeapon::Reload(bool bFromClient)
 {
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		ServerStartReload();
+	}
 
+	if (!bWaitingReload)
+	{
+		bWaitingReload = true;
+		DetermineWeaponState();
+	}
 }
 
 void ABaseWeapon::ServerStartFire_Implementation()
@@ -121,7 +189,7 @@ bool ABaseWeapon::ServerStopFire_Validate()
 
 void ABaseWeapon::ServerStartReload_Implementation()
 {
-	Reload();
+	Reload(true);
 }
 
 bool ABaseWeapon::ServerStartReload_Validate()
@@ -129,24 +197,107 @@ bool ABaseWeapon::ServerStartReload_Validate()
 	return true;
 }
 
+
+void ABaseWeapon::ClientStartReload_Implementation()
+{
+	Reload(false);
+}
+
+void ABaseWeapon::SetWeaponState(EWeaponState NewState)
+{
+	switch (NewState)
+	{
+	case EWeaponState::Idle:
+		// остонавливаем стрельбу
+		break;
+	case EWeaponState::Firing:
+		HandleFiring();
+		break;
+	case EWeaponState::Reloading:
+		// Останавливаем стрельбу, начинаем перезарядку
+		break;
+	case EWeaponState::Equipping:
+		// Останавливаем стрельбу, останавливаем перезарядку
+		break;
+	default:
+		
+		break;
+	}
+}
+
+void ABaseWeapon::DetermineWeaponState()
+{
+	EWeaponState NewState = EWeaponState::Idle;
+
+	if (bIsEquipped)
+	{
+		if (bWaitingReload && CanReload())
+		{
+			NewState = EWeaponState::Reloading;
+		}
+		else if(bWontsFire && CanFire())
+		{
+			NewState = EWeaponState::Firing;
+		}
+	}
+	else if(bWaitingEquip)
+	{
+		NewState = EWeaponState::Equipping;
+	}
+
+	SetWeaponState(NewState);
+}
+
+void ABaseWeapon::HandleFiring()
+{
+	if (GetWorldTimerManager().IsTimerActive(TimerHandle_Shot))
+	{
+		return;
+	}
+
+	float InFireDelay = 60.f / RateOfFire;
+
+	GetWorldTimerManager().SetTimer(TimerHandle_Shot, this, &ABaseWeapon::Shot, InFireDelay, true);
+}
+
+void ABaseWeapon::Shot()
+{
+	if (!bWontsFire || (!bIsAutomaticWeapon && ShotCounter > 0))
+	{
+		GetWorldTimerManager().ClearTimer(TimerHandle_Shot);
+		return;
+	}
+
+	if (AmmoInMagazine > 0)
+	{
+		
+	}
+	
+}
+
+void ABaseWeapon::SimulateShot()
+{
+
+}
+
 bool ABaseWeapon::CanFire() const
 {
-	return false;
+	return (WeaponState == EWeaponState::Idle && OwningPlayer && !bWaitingReload);
 }
 
 bool ABaseWeapon::CanReload() const
 {
-	return false;
+	bool bStateAllowsReload = ((WeaponState == EWeaponState::Idle) || (WeaponState == EWeaponState::Firing));
+	bool bGotAmmo = ((AmmoInMagazine < MagazineSize) && (AmountAmmo > 0));
+	return (bStateAllowsReload && bGotAmmo && OwningPlayer);
 }
 
-// Called when the game starts or when spawned
 void ABaseWeapon::BeginPlay()
 {
 	Super::BeginPlay();
 	
 }
 
-// Called every frame
 void ABaseWeapon::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
