@@ -2,9 +2,12 @@
 
 
 #include "BaseWeapon.h"
+#include "LCP.h"
 #include "Net/UnrealNetwork.h"
 #include "LCPCharacter.h"
+#include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystemComponent.h"
+
 
 // Sets default values
 ABaseWeapon::ABaseWeapon()
@@ -211,7 +214,7 @@ void ABaseWeapon::SetWeaponState(EWeaponState NewState)
 		// остонавливаем стрельбу
 		break;
 	case EWeaponState::Firing:
-		HandleFiring();
+		OnBurstStarted();
 		break;
 	case EWeaponState::Reloading:
 		// Останавливаем стрельбу, начинаем перезарядку
@@ -248,7 +251,7 @@ void ABaseWeapon::DetermineWeaponState()
 	SetWeaponState(NewState);
 }
 
-void ABaseWeapon::HandleFiring()
+void ABaseWeapon::OnBurstStarted()
 {
 	if (GetWorldTimerManager().IsTimerActive(TimerHandle_Shot))
 	{
@@ -257,22 +260,83 @@ void ABaseWeapon::HandleFiring()
 
 	float InFireDelay = 60.f / RateOfFire;
 
-	GetWorldTimerManager().SetTimer(TimerHandle_Shot, this, &ABaseWeapon::Shot, InFireDelay, true);
+	GetWorldTimerManager().SetTimer(TimerHandle_Shot, this, &ABaseWeapon::Shot, FMath::Max<float>(InFireDelay, SMALL_NUMBER), true);
+}
+
+void ABaseWeapon::OnBurstFinished()
+{
+	GetWorldTimerManager().ClearTimer(TimerHandle_Shot);
+
+	ShotCounter = 0;
+}
+
+void ABaseWeapon::WeaponTrace()
+{
+	const int32 RandomSeed = FMath::Rand();
+	FRandomStream WeaponRandomStream(RandomSeed);
+	const float ConeHalfAngle = FMath::DegreesToRadians(Spread * 0.5f);
+
+	FVector CameraLocation = FVector::ZeroVector;
+	FRotator CameraRotation = FRotator::ZeroRotator;
+
+	if (OwningPlayer)
+	{
+		AController* Controller = OwningPlayer->GetController();
+		if (Controller)
+		{
+			Controller->GetPlayerViewPoint(CameraLocation, CameraRotation);
+		}
+	}
+
+	const FVector TraceDirection = WeaponRandomStream.VRandCone(CameraRotation.Vector(), ConeHalfAngle, ConeHalfAngle);
+	const FVector TraceEnd = CameraLocation + TraceDirection * BIG_NUMBER;
+
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(WeaponTrace), true, OwningPlayer);
+
+	FHitResult Hit(ForceInit);
+	GetWorld()->LineTraceSingleByChannel(Hit, CameraLocation, TraceEnd, COLLISION_WEAPON, TraceParams);
+
+	if (Hit.GetActor())
+	{
+		UGameplayStatics::ApplyDamage(Hit.GetActor(), Damage, OwningPlayer->GetController(), this, UDamageType::StaticClass());
+	}
 }
 
 void ABaseWeapon::Shot()
 {
 	if (!bWontsFire || (!bIsAutomaticWeapon && ShotCounter > 0))
 	{
-		GetWorldTimerManager().ClearTimer(TimerHandle_Shot);
+		OnBurstFinished();
 		return;
 	}
 
 	if (AmmoInMagazine > 0)
 	{
-		
+		ShotCounter++;
+
+		if (GetLocalRole() < ROLE_Authority)
+		{
+			SimulateShot();
+		}
+		else
+		{
+			AmmoInMagazine--;
+
+			for (int i = 0; i < BulletInAmmo; i++)
+			{
+				WeaponTrace();
+			}
+		}
 	}
-	
+	else
+	{
+		OnBurstFinished();
+
+		if (CanReload())
+		{
+
+		}
+	}
 }
 
 void ABaseWeapon::SimulateShot()

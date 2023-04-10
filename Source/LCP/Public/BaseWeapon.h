@@ -35,9 +35,9 @@ struct FWeaponAnim
 		UAnimMontage* Pawn3P;
 
 	FWeaponAnim()
-		: Pawn1P(nullptr)
-		, Pawn3P(nullptr)
 	{
+		Pawn1P = nullptr;
+		Pawn3P = nullptr;
 	}
 };
 
@@ -99,6 +99,14 @@ protected:
 	// Determines whether the weapon can fire in bursts or single
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shooting")
 	bool bIsAutomaticWeapon = false;
+
+	// The angle of the spread of weapons in degrees
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shooting")
+	float Spread = 5.f;
+
+	// The number of bullets fired in one shot
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Shooting", meta = (ClampMin = 1))
+	int32 BulletInAmmo = 1;
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 	/// Visual
@@ -198,7 +206,11 @@ protected:
 
 	void DetermineWeaponState();
 
-	void HandleFiring();
+	void OnBurstStarted();
+
+	void OnBurstFinished();
+
+	void WeaponTrace();
 
 	UFUNCTION()
 	void Shot();
